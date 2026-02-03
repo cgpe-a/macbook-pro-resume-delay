@@ -3650,12 +3650,101 @@ Still works.
 
 Create a git repo:
 ```
+$ git config --global init.defaultBranch main
 $ echo /build/ > .gitignore
 $ echo \*.swp >> .gitignore
-$ git config --global init.defaultBranch
 $ git init
 $ git add .
+$ git commit
 ```
+Create a new [cgpe-a/macbook-pro-resume-delay](https://github.com/cgpe-a/macbook-pro-resume-delay) repo on GitHub, and upload:
+```
+$ git remote add origin git@github.com:cgpe-a/macbook-pro-resume-delay.git
+$ git push origin main
+```
+Create a Cloudflare account, and on Dashboard, Build, Compute & AI, Workers & Pages, Create application, Connect GitHub,... (lots of faffing)... Create a worker, Import an existing Git repository, select GitHub cgpe-a/macbook-pro-resume-delay, Build command = make html, Build output directory = build/html, Environment variables, PYTHON_VERSION = 3.12.
+
+The deploy fails. We have to continue and create the worker anyway so that we can then change the settings.
+
+The Cloudflare Pages [build docs](https://developers.cloudflare.com/pages/configuration/build-image) say that the v3 build system doesn't support pipenv. In the Settings for the project we need to set the Build system version to Version 1, and set PYTHON_VERSION to 3.7.
+
+Retrying the deploy still doesn't work, because the project `Pipfile` & `Pipfile.lock` were created using python 3.12. We need to remove it:
+```
+$ pipenv --rm
+$ rm Pipenv*
+```
+
+To create a python 3.7 pipenv, we need to install python 3.7, which isn't in the Ubuntu repos. We can use the [deadsnakes ppa](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa) to install it:
+```
+$ sudo add-apt-repository ppa:deadsnakes/ppa
+$ sudo apt update
+$ sudo apt install python3.7 python3.7-distutils python3.7-venv
+$ python3.7 -V
+Python 3.7.17
+```
+
+We can't use our existing pipenv, because it [doesn't work](https://github.com/pypa/pipenv/issues/6265) with python 3.7. We need to install the older 2023.10.3 version of pipenv.
+
+We also need to isolate the new pipenv installation from the system one, so we need a venv which we can use to re-install our pipenv:
+```
+$ python3.7 -m venv ~/python3.7venv
+$ ~/python3.7venv/bin/python -m pip install pipenv==2023.10.3
+$ ~/python3.7venv/bin/python -m pipenv --version
+pipenv, version 2023.10.3
+$ ~/python3.7venv/bin/python -m pipenv --python 3.7
+$ ~/python3.7venv/bin/python -m pipenv install
+$ ~/python3.7venv/bin/python -m pipenv install sphinx myst-parser
+$ ~/python3.7venv/bin/python -m pipenv shell
+(resume-delay) $ make html
+(resume-delay) $ exit
+```
+
+Now we have a `Pipfile` & `Pipfile.lock` that is python 3.7 specific, not python 3.12. Commit & push:
+```
+$ git add Pipfile Pipfile.lock
+$ git commit
+[main 9cae7b9] Regenerate Pipenv using python 3.7
+ 2 files changed, 170 insertions(+), 244 deletions(-)
+$ git push -u origin main
+```
+The push triggers an attempt to redeploy the site. It's still broken:
+```
+17:46:33.198	plette.models.base.ValidationError: {u'python_full_version': u'3.7.17', u'python_version': u'3.7'}
+17:46:33.198	python_full_version: 'python_version' must not be present with 'python_full_version'
+17:46:33.198	python_version: 'python_full_version' must not be present with 'python_version'
+17:46:33.259	Error installing Pipenv dependencies
+```
+We need to remove the `python_full_version` lines manually:
+```
+$ git diff
+diff --git a/Pipfile b/Pipfile
+index 1d5dd5a..a760a1d 100644
+--- a/Pipfile
++++ b/Pipfile
+@@ -11,4 +11,3 @@ myst-parser = "*"
+
+ [requires]
+ python_version = "3.7"
+-python_full_version = "3.7.17"
+diff --git a/Pipfile.lock b/Pipfile.lock
+index 5e2e0f6..e8f39c8 100644
+--- a/Pipfile.lock
++++ b/Pipfile.lock
+@@ -5,7 +5,6 @@
+         },
+         "pipfile-spec": 6,
+         "requires": {
+-            "python_full_version": "3.7.17",
+             "python_version": "3.7"
+         },
+         "sources": [
+$ git add Pipfile Pipfile.lock
+$ git commit
+[main 5ede887] Remove python_full_version from Pipfile & Pipfile.lock
+ 2 files changed, 2 deletions(-)
+$ git push
+```
+The deploy now works, and the [site](https://macbook-pro-resume-delay.pages.dev/) is available.
 
 ### b4 prep
 
