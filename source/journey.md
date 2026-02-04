@@ -3748,12 +3748,179 @@ The deploy now works, and the [site](https://macbook-pro-resume-delay.pages.dev/
 
 ### b4 prep
 
-TODO: Create new "series", and write cover note. Base branch on latest -rc release. Test again.
+Prepare the patch, as per the [b4 prep instructions](https://b4.docs.kernel.org/en/latest/contributor/prep.html). Use the latest rc tag at the time of the prep:
+```
+$ git pull
+$ b4 prep -n macbook-pro-mtrr-resume-fix -f v6.19-rc8
+$ git cherry-pick 5642f778
+$ b4 prep --edit-cover
+```
+
+Cover letter:
+```
+MacBook Pro (mid-2015) MTRR resume fix
+
+As per the commit message, this patch is about making my mid-2015
+MacBook Pro resume from suspend in a reasonable amount of time (3s
+rather that 20s).
+
+My whole investigative journey is documented in [1]. There is a lot
+there that will not be of interest, but some if the details may be, such
+as the observed MTRR values on resume [2].
+
+The Apple BIOS seems to be buggy with respect to CPU MTRR settings. Here
+is what I've observed:
+
+ * The MTRRs are always sane & consistent on boot.
+ * The MTRRs are unchanged by any of the Linux software I run.
+ * After suspending, on resume the boot processor MTRRs have usually
+   been modified [2] - I'm assuming by the BIOS.
+ * The MTRR modifications are the same on every suspend/resume cycle.
+ * Both the fixed & variable MTRRs change.
+ * When Linux brings up the secondary processors on resume, 3 of them
+   with have the same modified MTRRs as the BP, and 4 will have the
+   original MTRRs. There are 8 CPUs in total, so half are OK, and half
+   have changed.
+ * The AP MTRRs that are modified have the same fixed & variable MTRR
+   changes as on the BP.
+ * On the BP only, the default MTTR type is changed from writeback to
+   uncachable.
+ * For a single boot, every suspend/resume cycle will see the same MTRR
+   modifications on the same list of APs.
+ * After rebooting, the list of which specific 3/7 APs have the MTRR
+   modifications may change.
+ * I've never observed modified MTRRs on APs without also observing it
+   on the BP.
+ * On some (rare) boots the problem is not observed at all, regardless
+   of how many suspend/resume cycles are performed.
+ * FWIW I never observed extended resume times running MacOS X for many
+   years. I only switched to running Linux natively when it went EOL.
+
+The original MTRRs settings are restored by Linux and the system is
+fine, but this doesn't happen until after all the CPUs are brought up.
+While this is happening the CPUs have inconsistent MTRR settings, and
+the system runs very slowly, causing the long resume times.
+
+I have observed variation in the extended resume times [3], which is
+probaby caused not by which Linux version is running (which is what I
+was looking for), but by the (apparently random) differences in which
+specific APs have modified MTRRs, and therefore how long the system runs
+with inconsistent MTRR settings.
+
+My solution to the problem is to detect the MTRR modifications on the
+BP, and then expedite restoration of the MTRRs on the APs.
+
+A downside of this solution is that many more synchronised MTRR checks
+are performed [4], which could impact systems with many CPUs.
+
+I therefore have some questions about my fix:
+
+Are there systems were is it normal for the BP to have different MTRR
+settings between suspend and resume? If so, the new behaviour would be
+triggered on these systems, and resume times could be affected if they
+have many CPUs.
+
+Should I therefore add some additional condition on the new behaviour?
+Such as:
+
+ * Somehow identifying my specific BIOS.
+ * Limiting it to systems with <= n CPUs (where n is 8 for my system).
+ * Requiring some runtime config to enable it, such as a boot parameter.
+
+[1] https://macbook-pro-resume-delay.pages.dev/
+[2] https://macbook-pro-resume-delay.pages.dev/journey#changes-after-resume
+[3] https://macbook-pro-resume-delay.pages.dev/journey#id3
+[4] https://macbook-pro-resume-delay.pages.dev/journey#cost-of-extra-checks
+
+Signed-off-by: Chris Paulson-Ellis <chris@paulson-ellis.org>
+```
+
+Set the recipients:
+```
+$ b4 prep --auto-to-cc
+Will collect To: addresses using get_maintainer.pl
+Will collect Cc: addresses using get_maintainer.pl
+Collecting To/Cc addresses
+    + To: Thomas Gleixner <tglx@kernel.org>
+    + To: Ingo Molnar <mingo@redhat.com>
+    + To: Borislav Petkov <bp@alien8.de>
+    + To: Dave Hansen <dave.hansen@linux.intel.com>
+    + To: x86@kernel.org
+    + To: H. Peter Anvin <hpa@zytor.com>
+    + Cc: linux-kernel@vger.kernel.org
+```
+The list looks sane, but I've added Juergen Gross, as he seems to be [active recently](https://lore.kernel.org/lkml/20260130113625.599305-1-jgross@suse.com/) in the MTRR code:
+```
+$ b4 prep --edit-cover
+Cc: Juergen Gross <jgross@suse.com>
+```
+
+Check. My version of b4 doesn't have `prep --check`, so:
+```
+$ mkdir /tmp/p
+chris@macbookpro:~/linux$ b4 prep -p /tmp/p
+Writing 1 messages into /tmp/p
+  0001-x86-mtrr-expedite-cache-init-if-mtrrs-change-on-resume.patch
+$ scripts/checkpatch.pl /tmp/p/0001-x86-mtrr-expedite-cache-init-if-mtrrs-change-on-resume.patch
+total: 0 errors, 0 warnings, 124 lines checked
+
+/tmp/p/0001-x86-mtrr-expedite-cache-init-if-mtrrs-change-on-resume.patch has no obvious style problems and is ready for submission.
+```
+
+One last test (we have rebased on v6.19-rc8, so it's not a complete no-op):
+```
+$ make oldconfig
+$ git describe
+v6.19-rc8-2-g73d3f5bce14a
+$ cp .config .config-v6.19-rc8-2-g73d3f5bce14a-localmodconfig
+$ make -j$(nproc)
+$ sudo make modules_install
+$ sudo make install
+$ reboot
+...
+$ uname -r
+6.19.0-rc8-custom-00002-g73d3f5bce14a
+```
+Still works.
 
 ### b4 send
 
-TODO: Send!
+Send the patch, as per  the [b4 send instructions](https://b4.docs.kernel.org/en/latest/contributor/send.html).
+
+Set up signing:
+```
+$ sudo apt install patatt
+$ patatt genkey
+$ gvim ~/.gitconfig
+```
+Add:
+```
+[patatt]
+	signingkey = ed25519:20260204
+	selector = 20260204
+```
+
+As I have SMTP email working with [`git send-email`](https://git-scm.com/docs/git-send-email), I don't need to [configure](https://b4.docs.kernel.org/en/latest/contributor/send.html#configuring-the-web-endpoint) the b4 web endpoint.
+
+```
+$ b4 send -o /tmp/presend
+Converted the branch to 1 messages
+Will write out messages into /tmp/presend
+  0001-x86-mtrr-expedite-cache-init-if-mtrrs-change-on-resume.eml
+---
+DRYRUN: Would have sent 1 messages
+```
+
+Send only to myself:
+```
+$ b4 send --reflect
+```
+
+The received email looks okay. Send!:
+```
+$ b4 send
+```
 
 ## Patch review
 
-Waiting...
+Await response...
