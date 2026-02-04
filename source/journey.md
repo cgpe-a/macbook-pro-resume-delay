@@ -3921,6 +3921,77 @@ The received email looks okay. Send!:
 $ b4 send
 ```
 
+My patch appeared [on lore](https://lore.kernel.org/lkml/20260204-macbook-pro-mtrr-resume-fix-v1-1-25fc4326d06a@paulson-ellis.org/) after several minutes. I got a reply (see below) before it appeared!
+
 ## Patch review
 
-Await response...
+### Test with MTRR update parallelisation patch
+
+Jürgen Groß [asks](https://lore.kernel.org/lkml/a8d8e88b-ef88-4432-9da1-cb292d74d146@suse.com/T/#u) if the resume time is better with his [MTRR update parallelisation](https://lore.kernel.org/lkml/20260130113625.599305-1-jgross@suse.com/) patches.
+
+Add the patch series, although not as per [b4 prep dependency](https://b4.docs.kernel.org/en/latest/contributor/prep.html#working-with-series-dependencies) instructions, as my b4 version doesn't support `prep --edit-deps`, but rather in a new `mtrr-resume-fix-3` branch:
+```
+$ b4 mbox 20260130113625.599305-1-jgross@suse.com
+Grabbing thread from lore.kernel.org/all/20260130113625.599305-1-jgross@suse.com/t.mbox.gz
+5 messages in the thread
+Saved ./20260130113625.599305-1-jgross@suse.com.mbx
+$ git branch mtrr-resume-fix-3 v6.19-rc8
+$ git checkout mtrr-resume-fix-3
+$ git am 20260130113625.599305-1-jgross@suse.com.mbx
+$ git am --skip
+Applying: x86/mtrr: Move cache_enable() and cache_disable() to mtrr/generic.c
+Applying: x86/mtrr: Introduce MTRR work state structure
+Applying: x86/mtrr: Add a prepare_set hook to mtrr_ops
+Applying: x86/mtrr: Drop cache_disable_lock
+$ git cherry-pick 5642f778
+```
+Resolve conflicts, then:
+```
+$ git add arch/x86/include/asm/mtrr.h
+$ git add arch/x86/kernel/cpu/cacheinfo.c
+$ git add arch/x86/kernel/cpu/mtrr/generic.c
+$ git cherry-pick --continue
+```
+Test:
+```
+$ git describe
+v6.19-rc8-5-gb13b1e55c125
+$ make -j$(nproc)
+$ sudo make modules_install
+$ sudo make install
+$ reboot
+...
+$ uname -r
+6.19.0-rc8-custom-00005-gb13b1e55c125
+```
+The CPU bring up phase of resume now takes 80ms, where previously it took 90ms - in the test done after I added the diagnostic:
+```
+[   33.126866] ACPI: PM: Low-level resume complete
+[   33.126905] ACPI: EC: EC started
+[   33.126907] ACPI: PM: Restoring platform NVS memory
+[   33.127617] Enabling non-boot CPUs ...
+[   33.127760] smpboot: Booting Node 0 Processor 1 APIC 0x2
+[   33.146056] CPU1 is up
+[   33.146163] smpboot: Booting Node 0 Processor 2 APIC 0x4
+[   33.160213] CPU2 is up
+[   33.160301] smpboot: Booting Node 0 Processor 3 APIC 0x6
+[   33.173028] CPU3 is up
+[   33.173090] smpboot: Booting Node 0 Processor 4 APIC 0x1
+[   33.180594] CPU4 is up
+[   33.180645] smpboot: Booting Node 0 Processor 5 APIC 0x3
+[   33.188554] CPU5 is up
+[   33.188606] smpboot: Booting Node 0 Processor 6 APIC 0x5
+[   33.194605] CPU6 is up
+[   33.194657] smpboot: Booting Node 0 Processor 7 APIC 0x7
+[   33.202693] CPU7 is up
+[   33.202697] mtrr: your CPUs had unexpected MTRR settings on resume
+```
+Publish the branch that combines the changes...
+```
+$ git push github mtrr-resume-fix-3
+```
+... so that I can reference [that version](https://github.com/cgpe-a/linux/commits/mtrr-resume-fix-3/) in [my reply](https://lore.kernel.org/lkml/CAOo6X3_5BzqKa0cwc0xYea9_+XqsFD+mgLnYDhZn5OwXeOfy_A@mail.gmail.com/).
+
+### Stand by
+
+Awaiting further feedback.
